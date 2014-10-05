@@ -12,10 +12,10 @@ struct DBT{
 struct DB{
     /* Public API */
     int (*close)(const struct DB *db);
-    int (*del)(const struct DB *db, const struct DBT *key);
+    int (*del)(struct DB *db, const struct DBT *key);
     int (*get)(const struct DB *db, struct DBT *key, struct DBT *data);
-    int (*put)(const struct DB *db, struct DBT *key, const struct DBT *data);
-    //int (*sync)(const DB *db);
+    int (*put)(struct DB *db, struct DBT *key, struct DBT *data);
+    int (*sync)(const struct DB *db);
 }; /* Need for supporting multiple backends (HASH/BTREE) */
 
 struct DBC{
@@ -29,9 +29,9 @@ struct DBC{
         /* 16MB by default */
         size_t mem_size; //ne nado 
 };
-//DB!!!!!!!!!!!!!!!!!!!!!!!!!!
-struct MyDB *dbcreate(const char *file, const struct DBC *conf);
-struct MyDB *dbopen  (const char *file); /* Metadata in file */
+
+struct DB *dbcreate(const char *file, const struct DBC *conf);
+struct DB *dbopen  (const char *file); /* Metadata in file */
 
 struct BTreeNode{
     bool leaf; 
@@ -45,10 +45,11 @@ struct BTreeNode{
 struct MyDB{
     /* Public API */
     int (*close)(const struct DB *db);
-    int (*del)(const struct DB *db, const struct DBT *key);
+    int (*del)(struct DB *db, const struct DBT *key);
     int (*get)(const struct DB *db, struct DBT *key, struct DBT *data);
-    int (*put)(const struct DB *db, struct DBT *key, const struct DBT *data);
-    //int (*sync)(const DB *db);
+    int (*put)(struct DB *db, struct DBT *key, const struct DBT *data);
+    int (*sync)(const struct DB *db);
+    
     size_t t;//const for max, max_node_keys = 2t-1
     size_t chunk_size;
     
