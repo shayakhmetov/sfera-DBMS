@@ -3,6 +3,7 @@
 #define false 0
 
 typedef char bool;
+
 /* check `man dbopen` */
 struct DBT{
      void  *data;
