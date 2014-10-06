@@ -196,7 +196,6 @@ struct DB *dbopen  (const char *file){
 }
 
 int split_child(struct MyDB *myDB, struct BTreeNode *x,size_t i){
-    //if(myDB->size <= ???) return 0; 
     struct BTreeNode *y = node_disk_read(myDB, x->childs[i]);
     struct BTreeNode *z = create_BTreeNode(myDB,y->leaf);
     z->n = myDB->t - 1;
@@ -216,18 +215,18 @@ int split_child(struct MyDB *myDB, struct BTreeNode *x,size_t i){
     for(j=x->n ; j>=i; j--)
         x->childs[j+1] = x->childs[j];
     x->childs[i+1] = z->offset;
-    for(j=x->n-1; j>=i-1;j--){
+    for(j=x->n-1; j>=i-1; j--){
         memcpy(x->keys[j+1].data,x->keys[j].data, MAX_KEY_LENGTH);
         x->keys[j+1].size = x->keys[j].size;
         memcpy(x->values[j+1].data,x->values[j].data, MAX_VALUE_LENGTH);
         x->values[j+1].size = x->values[j].size;
     }
-    memcpy(x->keys[i].data,y->keys[myDB->t].data, MAX_KEY_LENGTH);
-    x->keys[i].size = y->keys[myDB->t].size;
-    memcpy(x->values[i].data,y->values[myDB->t].data, MAX_VALUE_LENGTH);
-    x->values[i].size = y->values[myDB->t].size;
+    memcpy(x->keys[i].data,y->keys[myDB->t - 1].data, MAX_KEY_LENGTH);
+    x->keys[i].size = y->keys[myDB->t -1 ].size;
+    memcpy(x->values[i].data,y->values[myDB->t - 1].data, MAX_VALUE_LENGTH);
+    x->values[i].size = y->values[myDB->t - 1].size;
     
-    x->n +=1;
+    x->n ++;
     node_disk_write(myDB,y);
     node_disk_write(myDB,z);
     node_disk_write(myDB,x);
@@ -265,28 +264,38 @@ int compare(const struct DBT k1, const struct DBT k2){// !!!!!!!!!!!!!!!!!!!!
 }
 
 int insert_nonfull(struct MyDB *myDB, struct BTreeNode *x, struct DBT *key, struct DBT *data){
-    size_t i = x->n;
+    long i = (x->n == 0) ? 0 : x->n - 1;
     if(x->leaf){
-        while(i>=0 && compare(*key,x->keys[i])<0 ){
-            memcpy(x->keys[i+1].data,x->keys[i].data, MAX_KEY_LENGTH);
-            x->keys[i+1].size = x->keys[i].size;
-            i-=1;
+        if(x->n == 0){
+            memcpy(x->keys[i].data, key->data, (key->size < MAX_KEY_LENGTH) ? key->size : MAX_KEY_LENGTH);
+            x->keys[i].size = key->size;
+            memcpy(x->values[i].data,data->data, (data->size < MAX_VALUE_LENGTH) ? data->size : MAX_VALUE_LENGTH);
+            x->values[i].size = data->size;
         }
-        memcpy(x->keys[i+1].data, key->data, (key->size < MAX_KEY_LENGTH) ? key->size : MAX_KEY_LENGTH);
-        x->keys[i+1].size = key->size;
-        memcpy(x->values[i+1].data,data->data, (data->size < MAX_VALUE_LENGTH) ? data->size : MAX_VALUE_LENGTH);
-        x->values[i+1].size = data->size;
-        x->n += 1;
+        else {
+            while(i>=0 && compare(*key , x->keys[i])<0 ){
+                memcpy(x->keys[i+1].data,x->keys[i].data, MAX_KEY_LENGTH);
+                x->keys[i+1].size = x->keys[i].size;
+                memcpy(x->values[i+1].data,x->values[i].data, MAX_VALUE_LENGTH);
+                x->values[i+1].size = x->values[i].size;
+                i--;
+            }
+            memcpy(x->keys[i+1].data, key->data, (key->size < MAX_KEY_LENGTH) ? key->size : MAX_KEY_LENGTH);
+            x->keys[i+1].size = key->size;
+            memcpy(x->values[i+1].data,data->data, (data->size < MAX_VALUE_LENGTH) ? data->size : MAX_VALUE_LENGTH);
+            x->values[i+1].size = data->size;
+        }
+        x->n ++;
         node_disk_write(myDB,x);
     }
     else{
-        while(i>=0 && compare(*key,x->keys[i])<0)
-            i-=1;
-        i=+1;
+        while(i>=0 && compare(*key , x->keys[i])<0)
+            i--;
+        i++;
         struct BTreeNode *c = node_disk_read(myDB, x->childs[i]); // !!!!!!!!!!!!!!
         if(c->n == 2*(myDB->t)-1){
             split_child(myDB,x,i);
-            if(compare(*key, x->keys[i])>0) i+=1;
+            if(compare(*key, x->keys[i])>0) i++;
         }
         insert_nonfull(myDB, c, key, data);
         free(c);
@@ -360,6 +369,11 @@ int main(){
     value.size = sizeof("twenty five");
     insert((struct DB *)db,&key,&value);
     
+    key.data = "0000";
+    key.size = sizeof("0000");
+    value.data = "the smallest";
+    value.size = sizeof("the smallest");
+    insert((struct DB *)db,&key,&value);
     
     print_DB_info(db);
     print_Node_info(db->root);
