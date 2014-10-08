@@ -6,7 +6,9 @@
 #include <unistd.h>
 #include <string.h>
 
-#define MAX_KEY_LENGTH  64
+#include <time.h>
+
+#define MAX_KEY_LENGTH  16
 #define MAX_VALUE_LENGTH  64
 
 //file = DB_METADATA + BTREE
@@ -271,7 +273,7 @@ struct DB *dbcreate(const char *file, const struct DBC *conf){
         fprintf(stderr,"ERROR: unlink()\n");
         return NULL;
     }
-    int file_id = open(file,  O_CREAT |O_RDWR |O_TRUNC ,0);
+    int file_id = open(file,  O_CREAT |O_RDWR |O_TRUNC ,S_IRWXU );
     if(file_id<0){
         fprintf(stderr,"ERROR: NOT VALID FILE DESCRIPTOR\n");
         return NULL;
@@ -337,9 +339,9 @@ struct DB *dbcreate(const char *file, const struct DBC *conf){
 }
 
 struct DB *dbopen  (const char *file){
-    int file_id = open(file, O_RDWR | O_APPEND, 0);
+    int file_id = open(file, O_RDWR , S_IRWXU );
     if(file_id<0){
-        fprintf(stderr,"ERROR: NOT VALID FILE DESCRIPTOR\n");
+        fprintf(stderr,"ERROR: NOT VALID FILE DESCRIPTOR in dbopen\n");
         return NULL;
     }
     struct MyDB *myDB = (struct MyDB *) malloc(sizeof(struct MyDB));
@@ -371,6 +373,8 @@ struct DB *dbopen  (const char *file){
         fprintf(stderr,"ERROR: CANNOT MALLOC myDB->exist\n");
         return NULL;
     }
+    
+    
     long i = 0;
     //chunk_size already in myDB
     i+=sizeof(size_t);
@@ -380,6 +384,7 @@ struct DB *dbopen  (const char *file){
     i+=sizeof(size_t);
     memcpy(&(myDB->max_size),(myDB->buffer+i),sizeof(size_t));
     i+=sizeof(size_t);
+    
     size_t root_offset;
     memcpy(&(root_offset),(myDB->buffer+i),sizeof(size_t));
     i+=sizeof(size_t);
@@ -413,51 +418,8 @@ int dbclose(struct DB *db){
 
 // -------------------- BTREE ALGORITHMS --------------
 
-int split_child(struct MyDB *myDB, struct BTreeNode *x,long i){
-    struct BTreeNode *y = node_disk_read(myDB, x->childs[i]);
-    struct BTreeNode *z = create_BTreeNode(myDB);
-    z->leaf = y->leaf;
-    z->n = myDB->t - 1;
-    long j;
-    for(j=0; j < myDB->t - 1; j++){
-        memcpy(z->keys[j].data,y->keys[j + myDB->t].data, MAX_KEY_LENGTH);
-        z->keys[j].size = y->keys[j + myDB->t].size;
-        memcpy(z->values[j].data,y->values[j + myDB->t].data, MAX_VALUE_LENGTH);
-        z->values[j].size = y->values[j + myDB->t].size;
-    }
-    if(!y->leaf){
-        for(j=0; j < myDB->t; j++ )
-            z->childs[j] = y->childs[j + myDB->t];
-    }
-    y->n = myDB->t-1;
-    for(j=x->n ; j>=i; j--)
-        x->childs[j+1] = x->childs[j];
-    x->childs[i+1] = z->offset;
-    if(x->n!=0){
-        for(j=x->n-1; j>=i-1; j--){
-            memcpy(x->keys[j+1].data,x->keys[j].data, MAX_KEY_LENGTH);
-            x->keys[j+1].size = x->keys[j].size;
-            memcpy(x->values[j+1].data,x->values[j].data, MAX_VALUE_LENGTH);
-            x->values[j+1].size = x->values[j].size;
-        }
-    }
-    memcpy(x->keys[i].data,y->keys[myDB->t - 1].data, MAX_KEY_LENGTH);
-    x->keys[i].size = y->keys[myDB->t -1 ].size;
-    memcpy(x->values[i].data,y->values[myDB->t - 1].data, MAX_VALUE_LENGTH);
-    x->values[i].size = y->values[myDB->t - 1].size;
-    
-    x->n ++;
-        
-    node_disk_write(myDB,y);
-    node_disk_write(myDB,z);
-    node_disk_write(myDB,x);
-    
-    node_free(myDB, y);
-    node_free(myDB, z);
-    return 0;
-}
 
-int compare(const struct DBT k1, const struct DBT k2){// key = string, representing number. example: "12", "145". P.S."00002323" == "2323"
+int compare(const struct DBT k1, const struct DBT k2){// key = string, representing number. example: "12", "145". P.S."00002323" == "2323", "99" < "100", "99" > "0999"
     if(k1.size == k2.size){
         return strncmp(k1.data,k2.data, k1.size);
     }
@@ -487,6 +449,50 @@ int compare(const struct DBT k1, const struct DBT k2){// key = string, represent
     }
 }
 
+struct BTreeNode *split_child(struct MyDB *myDB, struct BTreeNode *x,long i){//returns new created node
+    struct BTreeNode *y = node_disk_read(myDB, x->childs[i]);
+    struct BTreeNode *z = create_BTreeNode(myDB);
+    z->leaf = y->leaf;
+    z->n = myDB->t - 1;
+    long j;
+    for(j=0; j < myDB->t - 1; j++){
+        memcpy(z->keys[j].data,y->keys[j + myDB->t].data, MAX_KEY_LENGTH);
+        z->keys[j].size = y->keys[j + myDB->t].size;
+        memcpy(z->values[j].data,y->values[j + myDB->t].data, MAX_VALUE_LENGTH);
+        z->values[j].size = y->values[j + myDB->t].size;
+    }
+    if(!y->leaf){
+        for(j=0; j < myDB->t; j++ )
+            z->childs[j] = y->childs[j + myDB->t];
+    }
+    y->n = myDB->t-1;
+    for(j=x->n ; j>=i; j--)
+        x->childs[j+1] = x->childs[j];
+    x->childs[i+1] = z->offset;
+    if(x->n!=0 && i>0){
+        for(j=x->n-1; j>=i-1; j--){
+            memcpy(x->keys[j+1].data,x->keys[j].data, MAX_KEY_LENGTH);
+            x->keys[j+1].size = x->keys[j].size;
+            memcpy(x->values[j+1].data,x->values[j].data, MAX_VALUE_LENGTH);
+            x->values[j+1].size = x->values[j].size;
+        }
+    }
+    memcpy(x->keys[i].data,y->keys[myDB->t - 1].data, MAX_KEY_LENGTH);
+    x->keys[i].size = y->keys[myDB->t -1 ].size;
+    memcpy(x->values[i].data,y->values[myDB->t - 1].data, MAX_VALUE_LENGTH);
+    x->values[i].size = y->values[myDB->t - 1].size;
+        
+    x->n ++;
+        
+    node_disk_write(myDB,y);
+    node_disk_write(myDB,z);
+    node_disk_write(myDB,x);
+    
+    node_free(myDB, y);
+    return z;
+}
+
+
 int insert_nonfull(struct MyDB *myDB, struct BTreeNode *x, struct DBT *key, struct DBT *data){
     long i = x->n;
     if(x->leaf){
@@ -497,6 +503,7 @@ int insert_nonfull(struct MyDB *myDB, struct BTreeNode *x, struct DBT *key, stru
             memcpy(&(x->values[i].size), &(x->values[i-1].size),sizeof(size_t));
             i--;
         }
+        
         memcpy(x->keys[i].data, key->data, (key->size < MAX_KEY_LENGTH) ? key->size : MAX_KEY_LENGTH);
         memcpy(&(x->keys[i].size), &(key->size),sizeof(size_t));
         memcpy(x->values[i].data,data->data, (data->size < MAX_VALUE_LENGTH) ? data->size : MAX_VALUE_LENGTH);
@@ -508,15 +515,24 @@ int insert_nonfull(struct MyDB *myDB, struct BTreeNode *x, struct DBT *key, stru
         while(i>=1 && compare(*key , x->keys[i-1])<0)
             i--;
         i++;
-                
+        bool succ_child = false;        
         struct BTreeNode *c = node_disk_read(myDB, x->childs[i-1]); 
-
+        struct BTreeNode *z = NULL;
         if(c->n == 2*(myDB->t)-1){
-            split_child(myDB,x,i-1);
-            if(compare(*key, x->keys[i-1])>0) i++;
+            z = split_child(myDB,x,i-1);
+            if(compare(*key, x->keys[i-1])>0) succ_child = true;
         }
-        insert_nonfull(myDB, c, key, data);
+        if(succ_child == true) {
+            insert_nonfull(myDB, z, key, data);
+        }
+        else{
+            node_free(myDB,c);
+            c = node_disk_read(myDB, x->childs[i-1]);
+            insert_nonfull(myDB, c, key, data);
+        }
+        
         node_free(myDB,c);
+        if(z!=NULL) node_free(myDB,z);
     }
     return 0;
 }
@@ -524,20 +540,20 @@ int insert_nonfull(struct MyDB *myDB, struct BTreeNode *x, struct DBT *key, stru
 int insert(struct DB *db, struct DBT *key, struct DBT *data){
     struct MyDB *myDB = (struct MyDB *)db;
     struct BTreeNode *r = myDB->root;
-    if(myDB->root->n == 2*(myDB->t)-1){
+    if(r->n == 2*(myDB->t)-1){
         struct BTreeNode *s = create_BTreeNode(myDB);
         s->leaf = false;
         myDB->root = s;
-        dbmetadata_disk_write(myDB,-1);
-        //s->n = 0; by default in node_malloc
         s->childs[0] = r->offset;
+        //s->n = 0; by default in node_malloc
+        dbmetadata_disk_write(myDB,-1);
         node_disk_write(myDB,r);
         node_disk_write(myDB,s);
         
         node_free(myDB,r);
         
-        split_child(myDB,s,0);
-        
+        struct BTreeNode *z = split_child(myDB,s,0);
+        node_free(myDB,z);
         insert_nonfull(myDB, s, key, data);
     }
     else {
@@ -555,7 +571,7 @@ void print_DB_info(struct MyDB *myDB){
     printf("chunk_size -> %lu \n",myDB->chunk_size);
     printf("max_size -> %lu \n",myDB->max_size);
     printf("size -> %lu \n",myDB->size);
-    printf("--- ROOT NODE: ---");
+    printf("||||||||--- ROOT NODE: ---|||||||||||\n");
     print_Node_info(myDB, myDB->root);
 }
 
@@ -566,7 +582,7 @@ void print_Node_info(struct MyDB *myDB, struct BTreeNode *node){
     printf("isleaf -> %d \n",node->leaf);
     int i;
     for(i=0;i<node->n;i++){
-        printf("%d key is \"%s\"\n",i,(char *)(node->keys[i]).data);
+        printf("%d key is \"%s\", ",i,(char *)(node->keys[i]).data);
         printf("%d value is \"%s\"\n",i,(char *)(node->values[i]).data);
     }
     if(!node->leaf && node->n>0) {    
@@ -587,23 +603,43 @@ int main(){
     dbc.db_size = 512 * 1024 * 1024;
     dbc.chunk_size = 4096;
     dbc.mem_size = 16 * 1024 * 1024;
-    struct MyDB *db = (struct MyDB *) dbcreate("temp.db",&dbc);
+    struct MyDB *db = (struct MyDB *) dbcreate("temp.db",&dbc); //dbopen or dbcreate
     struct DBT key,value;
-    
+    key.data = malloc(MAX_KEY_LENGTH);
+    value.data = malloc(MAX_VALUE_LENGTH);
     print_DB_info(db);
-    int j=0;
-    char buf[3];
-    buf[2] = '\0';
-    printf("\nAFTER INSERT:\n");
-    for(j=0;j<30;j++) {
-        key.data = buf;
-        *((char *)key.data + 1) = 48 + j % 10;
-        *((char *)key.data) = 48 + ((j<10) ? 1 : ((j<20) ? 2 : ((j<30) ? 3 : 4)));
-        key.size = strlen(key.data)+1;
-        value.data = "blablablah";
-        value.size = strlen(value.data)+1;
+    int j=0,i=0;
+    
+    char kbuf[MAX_KEY_LENGTH];
+    char vbuf[MAX_VALUE_LENGTH];
+    memset(kbuf,0,MAX_KEY_LENGTH);
+    memset(vbuf,0,MAX_VALUE_LENGTH);
+    kbuf[MAX_KEY_LENGTH-1] = '\0';
+    vbuf[MAX_VALUE_LENGTH-1] = '\0';
+    key.size = MAX_KEY_LENGTH;
+    value.size = MAX_VALUE_LENGTH;
+    
+    printf("\nAFTER INSERT:\n\n");
+    srand(time(NULL));
+    for(j=0;j<1000;j++) {// (keys,values)
+
+        for(i=0;i<key.size-1;i++){
+            kbuf[i] = '0' + rand() % 10;
+        }
+        for(i=0;i<value.size-1;i++){
+            vbuf[i] = 'a' + rand() % 26;
+        }
+        //print_DB_info(db);
+        memcpy(key.data, kbuf, key.size);
+        memcpy(value.data, vbuf, value.size);
         insert((struct DB *)db,&key,&value);
     }
+    key.size=3;
+    kbuf[0]='1';
+    kbuf[1]='2';
+    kbuf[2]='\0';
+    memcpy(key.data, kbuf, key.size);
+    insert((struct DB *)db,&key,&value);
     
     print_DB_info(db);
     return 0;
