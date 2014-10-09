@@ -63,4 +63,8 @@ struct MyDB{
     size_t max_size; //max pages .NOT db_size
 };
 
-
+//For debug purposes and more
+struct BTreeSearchResult{
+    struct BTreeNode *node;
+    size_t index;
+};
