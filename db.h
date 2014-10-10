@@ -3,7 +3,7 @@
 #define false 0
 
 typedef char bool;
-
+typedef unsigned char byte;
 /* check `man dbopen` */
 struct DBT{
      void  *data;
@@ -55,12 +55,12 @@ struct MyDB{
     size_t chunk_size;
     
     struct BTreeNode *root; // !!!not in file->DB_METADATA !!! 
-    char *buffer; // not in file
+    byte *buffer; // not in file
     int id_file; // file handler, !!!not in file->DB_METADATA !!!
     
-    bool *exist; //bitmask for existing pages in file
+    byte *exist; //bitmask for existing pages in file
     size_t size; //of pages in BTree
-    size_t max_size; //max pages .NOT db_size
+    size_t max_size; //max_size == max pages (.NOT db_size)
 };
 
 //For debug purposes and more

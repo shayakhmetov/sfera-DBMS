@@ -32,7 +32,7 @@ int dbmetadata_disk_write(struct MyDB *myDB, long index );
 
 // offset(number of node) to real offset in file
 size_t convert_offset(const struct MyDB *myDB, size_t offset){
-    return (offset + 1 + myDB->max_size/myDB->chunk_size ) * myDB->chunk_size; //+1 is because DB metadata in first chunk, next chunks for bitmask
+    return (offset + 1 + (myDB->max_size/8)/myDB->chunk_size) * myDB->chunk_size; //+1 is because DB metadata in first chunk, next chunks for bitmask
 }
 
 // ------------- CREATION OF NODE --------------
@@ -95,21 +95,25 @@ void node_free(const struct MyDB *myDB, struct BTreeNode *s){
 
 int assign_BTreeNode(struct MyDB *myDB, struct BTreeNode *node){//assign existing (not in file) node's offset in file 
     long i;
-    for(i=0; (i < myDB->size+1) && (i < myDB->max_size); i++)
-        if(myDB->exist[i]==false) break;
-    if(i>=myDB->max_size) return -1;   
+    for(i=0; (i < myDB->size/8 + 1) && (i < myDB->max_size/8); i++)
+        if(myDB->exist[i] !=  255 ) break;
+    if(i>=myDB->max_size/8) return -1;
+    char j = 7;
+    while ( j>0 && ((myDB->exist[i] & (1 << j)) >> j)  == 1  ) j--;
+    myDB->exist[i] = myDB->exist[i] | (1 << j);
     myDB->size ++;
-    myDB->exist[i] = true;
-    
-    dbmetadata_disk_write(myDB,i);
-    node->offset = i;
-    
+    node->offset = i*8 + 7 - j;
+    dbmetadata_disk_write(myDB, node->offset);
     return 0;
 }
 
 struct BTreeNode *create_BTreeNode(struct MyDB *myDB){//malloc and assign node's offset in file (in free position) 
     struct BTreeNode *node = node_malloc(myDB); 
-    assign_BTreeNode(myDB,node);
+    if (assign_BTreeNode(myDB,node)<0){
+        fprintf(stderr,"ERROR: cannot assign node\n");
+        node_free(myDB, node);
+        return NULL;
+    }
     return node;
 }
 
@@ -249,8 +253,8 @@ int dbmetadata_disk_write(struct MyDB *myDB, long index ){//update DB metadata
         return -1;
     }
     if(index>=0 && index<myDB->max_size){
-        //next in file (max_size/chunk_size) pages of bitmask myDB->exist
-        long j = index / myDB->chunk_size;
+        //next in file (max_size/8)/chunk_size pages of bitmask myDB->exist
+        long j = (index / 8) / myDB->chunk_size;
         for(i=0; i < myDB->chunk_size; i++)
             myDB->buffer[i] = myDB->exist[i+j*myDB->chunk_size];
         if(lseek(myDB->id_file, j*myDB->chunk_size, SEEK_CUR) < 0){
@@ -269,10 +273,6 @@ int dbmetadata_disk_write(struct MyDB *myDB, long index ){//update DB metadata
 // ----------------WORK WITH DB ---------------------
 
 struct DB *dbcreate(const char *file, const struct DBC *conf){
-    if(unlink(file)<0){
-        fprintf(stderr,"ERROR: unlink()\n");
-        return NULL;
-    }
     int file_id = open(file,  O_CREAT |O_RDWR | O_TRUNC, S_IRWXU );
     if(file_id<0){
         fprintf(stderr,"ERROR: NOT VALID FILE DESCRIPTOR\n");
@@ -293,26 +293,26 @@ struct DB *dbcreate(const char *file, const struct DBC *conf){
     if(max_node_keys % 2 == 0) max_node_keys -= 1;
     myDB->t = (max_node_keys+1)/2;
     myDB->size = 0;
-    myDB->max_size = ( (conf->db_size/myDB->chunk_size-1)/(myDB->chunk_size+1) ) * myDB->chunk_size;//first chunk - DB metadata
-    myDB->buffer = calloc(myDB->chunk_size, sizeof(char));
+    myDB->max_size = ( (conf->db_size/myDB->chunk_size-1)/(myDB->chunk_size+1) ) * (myDB->chunk_size);
+    myDB->buffer = calloc(myDB->chunk_size, sizeof(byte));
     if(myDB->buffer == NULL){
         fprintf(stderr,"ERROR: CANNOT MALLOC myDB->buffer\n");
         return NULL;
     }
-    myDB->exist =(bool *) calloc(myDB->max_size, sizeof(bool));
+    myDB->exist =(byte *) calloc(myDB->max_size/8, sizeof(byte));
     if(myDB->exist == NULL){
         fprintf(stderr,"ERROR: CANNOT MALLOC myDB->exist\n");
         return NULL;
     }
     long i;
-    for(i=0; i<myDB->max_size; i++)
-        myDB->exist[i] = false;
+    for(i=0; i<myDB->max_size/8; i++)
+        myDB->exist[i] = 0;
        
     myDB->root = create_BTreeNode(myDB);//creation of root //myDB->root->leaf = true  and  myDB->offset = 0 by default in node_malloc() 
     
     //node metadata = sizeof(offset+leaf+n) + (n+1)*sizeof(child) + n*sizeof(k+v+!!!!!!!!!16!!!!!!!!!!)
     
-    //DB_METADATA = 1 chunk () + m chunk (exist[])
+    //DB_METADATA = 1 chunk () + max_size/8 chunks of (exist[])
     i=0;
     memcpy((myDB->buffer+i),&(myDB->chunk_size),sizeof(size_t));
     i+=sizeof(size_t);
@@ -322,22 +322,22 @@ struct DB *dbcreate(const char *file, const struct DBC *conf){
     i+=sizeof(size_t);
     memcpy((myDB->buffer+i),&(myDB->max_size),sizeof(size_t));
     i+=sizeof(size_t);
-    memcpy((myDB->buffer+i),&(myDB->root->offset),sizeof(size_t));//myDB->root->offset 
+    memcpy((myDB->buffer+i),&(myDB->root->offset),sizeof(size_t));//offset ot root
     i+=sizeof(size_t);
     
     if(write(file_id, myDB->buffer , myDB->chunk_size) != myDB->chunk_size){//first main chunk with metadata in file
         fprintf(stderr,"ERROR: write\n");
         return NULL;
     } 
-    //next in file (max_size/chunk_size) pages of bitmask myDB->exist
-    memset(myDB->buffer,0,myDB->chunk_size*sizeof(char));
-    long j=0;
-    for(j=0; j < myDB->max_size / myDB->chunk_size; j++)
+    //next in file (max_size/8)*chunk_size pages of bitmask myDB->exist
+    memset(myDB->buffer,0,myDB->chunk_size*sizeof(byte));
+    long j;
+    for(j=0; j < (myDB->max_size / 8) / myDB->chunk_size; j++){
         if(write(file_id, myDB->buffer,myDB->chunk_size) != myDB->chunk_size){
             fprintf(stderr,"ERROR: write\n");
             return NULL;
         }
-        
+    }
     node_disk_write(myDB,myDB->root);
     return (struct DB *)myDB;
 }
@@ -363,7 +363,7 @@ struct DB *dbopen(const char *file){
         return NULL;
     }
     
-    myDB->buffer = (char *) malloc(myDB->chunk_size*sizeof(char)); 
+    myDB->buffer = (byte *) malloc(myDB->chunk_size*sizeof(byte)); 
     if(myDB->buffer == NULL){
         fprintf(stderr,"ERROR: CANNOT MALLOC myDB->buffer\n");
         return NULL;
@@ -396,7 +396,7 @@ struct DB *dbopen(const char *file){
     
     myDB->root = node_disk_read(myDB,root_offset);
     //print_Node_info((struct DB *)myDB,myDB->root);
-    myDB->exist = calloc(myDB->max_size , sizeof(bool));
+    myDB->exist = calloc(myDB->max_size/8 , sizeof(byte));
     if(myDB->exist == NULL){
         fprintf(stderr,"ERROR: CANNOT MALLOC myDB->exist\n");
         return NULL;
@@ -407,8 +407,8 @@ struct DB *dbopen(const char *file){
         return NULL;
     }
     long j;
-    //next in file (max_size/chunk_size) pages of bitmask myDB->exist
-    for(j=0;j < myDB->max_size / myDB->chunk_size; j++){
+    //next in file (max_size/8)/chunk_size pages of bitmask myDB->exist
+    for(j=0;j < (myDB->max_size / 8)/ myDB->chunk_size; j++){
         if(read(file_id, myDB->buffer,myDB->chunk_size)!=myDB->chunk_size){
             fprintf(stderr,"ERROR: read()\n");
             return NULL;
@@ -579,8 +579,8 @@ int insert(struct DB *db, struct DBT *key, struct DBT *data){
         s->leaf = false;
         myDB->root = s;
         s->childs[0] = r->offset;
-        //s->n = 0; by default in node_malloc
-        dbmetadata_disk_write(myDB,-1);
+        //s->n = 0; by default in node_malloc by create_BTreeNode
+        dbmetadata_disk_write(myDB,-1); // -1 is coz no need to update exist
         node_disk_write(myDB,r);
         node_disk_write(myDB,s);
         node_free(myDB,r);
@@ -642,9 +642,12 @@ void print_DB_info(const struct DB *db){
     printf("max_size -> %lu \n",myDB->max_size);
     printf("size -> %lu \n",myDB->size);
     long i;
+    char j;
     printf("-------EXISTS:\n");
-    for(i=0;i<myDB->size;i++){
-        printf("%d",myDB->exist[i]);
+    for(i=0;i<myDB->size/8;i++){
+        for(j=7;j>=0;j--){
+            printf("%d",(myDB->exist[i] & (1 << j)) >> j);
+        }
     }
     printf("\n||||||||--- ROOT NODE: ---|||||||||||\n");
     print_Node_info((const struct DB *)myDB, myDB->root);
@@ -678,7 +681,7 @@ void print_Node_info(const struct DB *db, struct BTreeNode *node){
 // --------------------- Main OPEN AND CREATE for debug purposes ---------------
 
 int main1(){
-    struct DB *db = dbopen("temp.db");
+    struct DB *db = dbopen("my.db");
     //print_DB_info(db);
     
     struct DBT key,value;
@@ -695,24 +698,28 @@ int main1(){
     kbuf[2]='\0';
     memcpy(key.data, kbuf, key.size);
     
-    if(search(db,&key,&value)<0) fprintf(stderr,"(~____~)");
+    if(search(db,&key,&value)<0) fprintf(stderr,"(____|____) NOT FOUND!!!\n");
     else fprintf(stderr,"%s\n",(char *)value.data);
     
     dbclose(db);
     return 0;
 }
 
-int main(){
-    main1();
-    return 0;
-    
+int main(int argc, char *argv[]){
+    if(argc > 1 && strcmp(argv[1],"open")==0){
+        main1();
+        return 0;
+    }
+
     struct DBC dbc;
     dbc.db_size = 512 * 1024 * 1024;
     dbc.chunk_size = 4096;
     dbc.mem_size = 16 * 1024 * 1024;
-    struct DB *db = dbcreate("temp.db",&dbc); //dbopen or dbcreate
+    struct DB *db = dbcreate("my.db",&dbc); 
+    
     struct DBT key,value;
     print_DB_info(db);
+    
     key.data = malloc(MAX_KEY_LENGTH);
     value.data = malloc(MAX_VALUE_LENGTH);
     int j=0,i=0;
@@ -728,7 +735,7 @@ int main(){
     
     printf("\nAFTER INSERT:\n\n");
     srand(time(NULL));
-    for(j=0;j<10000;j++) {// (keys,values)
+    for(j=0;j<1000;j++) {// (keys,values)
 
         for(i=0;i<key.size-1;i++){
             kbuf[i] = '0' + rand() % 10;
@@ -736,10 +743,12 @@ int main(){
         for(i=0;i<value.size-1;i++){
             vbuf[i] = 'a' + rand() % 26;
         }
+        if(j>900)print_DB_info(db);
         memcpy(key.data, kbuf, key.size);
         memcpy(value.data, vbuf, value.size);
         insert(db,&key,&value);
     }
+    
     fprintf(stderr,"KEY %s\n",(char *)key.data);
     if(search(db,&key,&value)<0) fprintf(stderr,"(____|____) NOT FOUND!!!\n");
     else fprintf(stderr,"SEARCHED %s\n",(char *)value.data);
