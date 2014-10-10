@@ -735,7 +735,7 @@ int main(int argc, char *argv[]){
     
     printf("\nAFTER INSERT:\n\n");
     srand(time(NULL));
-    for(j=0;j<1000;j++) {// (keys,values)
+    for(j=0;j<10000;j++) {// (keys,values)
 
         for(i=0;i<key.size-1;i++){
             kbuf[i] = '0' + rand() % 10;
@@ -743,7 +743,6 @@ int main(int argc, char *argv[]){
         for(i=0;i<value.size-1;i++){
             vbuf[i] = 'a' + rand() % 26;
         }
-        if(j>900)print_DB_info(db);
         memcpy(key.data, kbuf, key.size);
         memcpy(value.data, vbuf, value.size);
         insert(db,&key,&value);
