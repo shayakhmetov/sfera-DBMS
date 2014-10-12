@@ -28,11 +28,16 @@ struct DBC{
         size_t chunk_size; //page,block 4KB
         /* Maximum memory size */
         /* 16MB by default */
-        size_t mem_size; //ne nado 
+        //size_t mem_size; //ne nado 
 };
 
-struct DB *dbcreate(const char *file, const struct DBC *conf);
+struct DB *dbcreate(const char *file, struct DBC conf);
 struct DB *dbopen  (const char *file); /* Metadata in file */
+
+int db_close(struct DB *db);
+int db_del(struct DB *, void *, size_t);
+int db_get(struct DB *, void *, size_t, void **, size_t *);
+int db_put(struct DB *, void *, size_t, void * , size_t  );
 
 struct BTreeNode{
     bool leaf; 
@@ -48,7 +53,7 @@ struct MyDB{
     int (*close)(struct DB *db);
     int (*del)(struct DB *db, const struct DBT *key);
     int (*get)(const struct DB *db, struct DBT *key, struct DBT *data);
-    int (*put)(struct DB *db, struct DBT *key, const struct DBT *data);
+    int (*put)(struct DB *db, struct DBT *key, struct DBT *data);
     int (*sync)(const struct DB *db);
     
     size_t t;//const for max, max_node_keys = 2t-1
@@ -58,9 +63,10 @@ struct MyDB{
     byte *buffer; // not in file
     int id_file; // file handler, !!!not in file->DB_METADATA !!!
     
-    byte *exist; //bitmask for existing pages in file
+    byte *exist; //bitset for existing pages in file
     size_t size; //of pages in BTree
     size_t max_size; //max_size == max pages (.NOT db_size)
+    int depth;
 };
 
 //For debug purposes and more

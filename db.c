@@ -8,7 +8,7 @@
 
 #include <time.h>
 
-#define MAX_KEY_LENGTH  16
+#define MAX_KEY_LENGTH  32
 #define MAX_VALUE_LENGTH  64
 
 //file = DB_METADATA + BTREE
@@ -29,10 +29,16 @@ int node_disk_write(struct MyDB *myDB, struct BTreeNode *node);
 struct BTreeNode *node_disk_read(const struct MyDB *myDB, size_t offset );
 int dbmetadata_disk_write(struct MyDB *myDB, long index );
 
+int insert(struct DB *db, struct DBT *key, struct DBT *data);
+int search(const struct DB *db, struct DBT *key, struct DBT *data);
+
+//int delete(struct DB *db, const struct DBT *key){return 0;}
+//int dbsync(const struct DB *db){return 0;}
+
 
 // offset(number of node) to real offset in file
 size_t convert_offset(const struct MyDB *myDB, size_t offset){
-    return (offset + 1 + (myDB->max_size/8)/myDB->chunk_size) * myDB->chunk_size; //+1 is because DB metadata in first chunk, next chunks for bitmask
+    return (offset + 1 + (myDB->max_size/8)/myDB->chunk_size) * myDB->chunk_size; //+1 is because DB metadata in first chunk, next chunks for bitset
 }
 
 // ------------- CREATION OF NODE --------------
@@ -120,12 +126,12 @@ struct BTreeNode *create_BTreeNode(struct MyDB *myDB){//malloc and assign node's
 
 // ------------------ DISK OPERATIONS ----------------- 
 int node_disk_write(struct MyDB *myDB, struct BTreeNode *node){
-    int file_id = myDB->id_file;
-    if(file_id<0){
+    int id_file = myDB->id_file;
+    if(id_file<0){
         fprintf(stderr,"ERROR: NOT VALID FILE DESCRIPTOR\n");
         return -1;
     }
-    if(lseek(file_id, convert_offset(myDB, node->offset), SEEK_SET)<0){
+    if(lseek(id_file, convert_offset(myDB, node->offset), SEEK_SET)<0){
         fprintf(stderr,"ERROR: lseek()\n");
         return -1;
     }  
@@ -166,7 +172,7 @@ int node_disk_write(struct MyDB *myDB, struct BTreeNode *node){
         }
     }
     
-    if(write(file_id, myDB->buffer , myDB->chunk_size) != myDB->chunk_size){
+    if(write(id_file, myDB->buffer , myDB->chunk_size) != myDB->chunk_size){
         fprintf(stderr,"ERROR: write()\n");
         return -1;
     }
@@ -175,19 +181,19 @@ int node_disk_write(struct MyDB *myDB, struct BTreeNode *node){
 
 
 struct BTreeNode *node_disk_read(const struct MyDB *myDB, size_t offset ){
-    int file_id = myDB->id_file;
-    if(file_id<0){
+    int id_file = myDB->id_file;
+    if(id_file<0){
         fprintf(stderr,"NOT VALID FILE DESCRIPTOR\n");
         return NULL;
     }
     struct BTreeNode *node = node_malloc(myDB);
     
-    if(lseek(file_id, convert_offset(myDB, offset), SEEK_SET)<0){
+    if(lseek(id_file, convert_offset(myDB, offset), SEEK_SET)<0){
         fprintf(stderr,"ERROR: lseek()\n");
         return NULL;
     }
     long i=0;
-    if(read(file_id, myDB->buffer, myDB->chunk_size) != myDB->chunk_size){
+    if(read(id_file, myDB->buffer, myDB->chunk_size) != myDB->chunk_size){
         fprintf(stderr,"ERROR: reed()\n");
         return NULL;
     }
@@ -243,6 +249,10 @@ int dbmetadata_disk_write(struct MyDB *myDB, long index ){//update DB metadata
     if(myDB->root != NULL )
         memcpy((myDB->buffer+i),&(myDB->root->offset),sizeof(size_t));
     else memset((myDB->buffer+i),0,sizeof(size_t));
+    i+=sizeof(size_t);
+    memcpy((myDB->buffer+i),&(myDB->depth),sizeof(int));
+    i+=sizeof(int);
+    
     
     if(lseek(myDB->id_file, 0, SEEK_SET) < 0){
         fprintf(stderr,"ERROR: lseek()\n");
@@ -253,7 +263,7 @@ int dbmetadata_disk_write(struct MyDB *myDB, long index ){//update DB metadata
         return -1;
     }
     if(index>=0 && index<myDB->max_size){
-        //next in file (max_size/8)/chunk_size pages of bitmask myDB->exist
+        //next in file (max_size/8)/chunk_size pages of bitset myDB->exist
         long j = (index / 8) / myDB->chunk_size;
         for(i=0; i < myDB->chunk_size; i++)
             myDB->buffer[i] = myDB->exist[i+j*myDB->chunk_size];
@@ -272,9 +282,24 @@ int dbmetadata_disk_write(struct MyDB *myDB, long index ){//update DB metadata
 
 // ----------------WORK WITH DB ---------------------
 
-struct DB *dbcreate(const char *file, const struct DBC *conf){
-    int file_id = open(file,  O_CREAT |O_RDWR | O_TRUNC, S_IRWXU );
-    if(file_id<0){
+int dbclose(struct DB *db){
+    int res;
+    struct MyDB *myDB = (struct MyDB *) db;
+    if(close(myDB->id_file)<0){
+        fprintf(stderr,"ERROR: CANNOT close file\n");
+        res = -1;
+    }
+    if(myDB==NULL) return -1;
+    node_free(myDB,myDB->root);
+    free(myDB->buffer);
+    free(myDB->exist);
+    free(myDB);
+    return res;  
+}
+
+struct DB *dbcreate(const char *file, struct DBC conf){
+    int id_file = open(file,  O_CREAT |O_RDWR | O_TRUNC, S_IRWXU );
+    if(id_file<0){
         fprintf(stderr,"ERROR: NOT VALID FILE DESCRIPTOR\n");
         return NULL;
     }
@@ -283,17 +308,27 @@ struct DB *dbcreate(const char *file, const struct DBC *conf){
         fprintf(stderr,"ERROR: CANNOT MALLOC myDB\n");
         return NULL;
     }
+    myDB->close = &dbclose;
+    myDB->get = &search;
+    myDB->put = &insert;
+    //myDB->del = &delete;
+    //myDB->sync = &4dbsync;
+    
     myDB->root = NULL;
     myDB->buffer = NULL;
     myDB->exist = NULL;
-    myDB->id_file = file_id;
+    myDB->depth = 0;
+    myDB->id_file = id_file;
     
-    myDB->chunk_size = conf->chunk_size;
+    myDB->chunk_size = conf.chunk_size;
+    
     int max_node_keys = (myDB->chunk_size - 3*sizeof(size_t)-sizeof(bool))/(3*sizeof(size_t) + MAX_KEY_LENGTH + MAX_VALUE_LENGTH); // max_node_keys == 2t-1
     if(max_node_keys % 2 == 0) max_node_keys -= 1;
     myDB->t = (max_node_keys+1)/2;
+    
     myDB->size = 0;
-    myDB->max_size = ( (conf->db_size/myDB->chunk_size-1)/(myDB->chunk_size+1) ) * (myDB->chunk_size);
+    myDB->max_size = ((conf.db_size/myDB->chunk_size - 1 )/((double)(myDB->chunk_size+1)) ) * (myDB->chunk_size);
+    
     myDB->buffer = calloc(myDB->chunk_size, sizeof(byte));
     if(myDB->buffer == NULL){
         fprintf(stderr,"ERROR: CANNOT MALLOC myDB->buffer\n");
@@ -324,27 +359,31 @@ struct DB *dbcreate(const char *file, const struct DBC *conf){
     i+=sizeof(size_t);
     memcpy((myDB->buffer+i),&(myDB->root->offset),sizeof(size_t));//offset ot root
     i+=sizeof(size_t);
+    memcpy((myDB->buffer+i),&(myDB->depth),sizeof(int));
+    i+=sizeof(int);
     
-    if(write(file_id, myDB->buffer , myDB->chunk_size) != myDB->chunk_size){//first main chunk with metadata in file
+    
+    if(write(id_file, myDB->buffer , myDB->chunk_size) != myDB->chunk_size){//first main chunk with metadata in file
         fprintf(stderr,"ERROR: write\n");
         return NULL;
     } 
-    //next in file (max_size/8)*chunk_size pages of bitmask myDB->exist
+    //next in file (max_size/8)*chunk_size pages of bitset myDB->exist
     memset(myDB->buffer,0,myDB->chunk_size*sizeof(byte));
     long j;
     for(j=0; j < (myDB->max_size / 8) / myDB->chunk_size; j++){
-        if(write(file_id, myDB->buffer,myDB->chunk_size) != myDB->chunk_size){
+        if(write(id_file, myDB->buffer,myDB->chunk_size) != myDB->chunk_size){
             fprintf(stderr,"ERROR: write\n");
             return NULL;
         }
     }
     node_disk_write(myDB,myDB->root);
+    
     return (struct DB *)myDB;
 }
 
 struct DB *dbopen(const char *file){
-    int file_id = open(file, O_RDWR, S_IRWXU);
-    if(file_id<0){
+    int id_file = open(file, O_RDWR, S_IRWXU);
+    if(id_file<0){
         fprintf(stderr,"ERROR: NOT VALID FILE DESCRIPTOR in dbopen\n");
         return NULL;
     }
@@ -356,9 +395,9 @@ struct DB *dbopen(const char *file){
     myDB->root = NULL;
     myDB->buffer = NULL;
     myDB->exist = NULL;
-    myDB->id_file = file_id;
+    myDB->id_file = id_file;
     
-    if(read(file_id,&(myDB->chunk_size) ,sizeof(size_t)) != sizeof(size_t)){
+    if(read(id_file,&(myDB->chunk_size) ,sizeof(size_t)) != sizeof(size_t)){
         fprintf(stderr,"ERROR: CANNOT read chunk_size\n");
         return NULL;
     }
@@ -369,12 +408,12 @@ struct DB *dbopen(const char *file){
         return NULL;
     }
     
-    if(lseek(file_id, 0, SEEK_SET)<0){
+    if(lseek(id_file, 0, SEEK_SET)<0){
         fprintf(stderr,"ERROR: lseek()\n");
         return NULL;
     }
     
-    if(read(file_id, myDB->buffer ,myDB->chunk_size) != myDB->chunk_size){
+    if(read(id_file, myDB->buffer ,myDB->chunk_size) != myDB->chunk_size){
         fprintf(stderr,"ERROR: CANNOT read\n");
         return NULL;
     }
@@ -393,6 +432,8 @@ struct DB *dbopen(const char *file){
     size_t root_offset;
     memcpy(&(root_offset),(myDB->buffer+i),sizeof(size_t));
     i+=sizeof(size_t);
+    memcpy(&(myDB->depth),(myDB->buffer+i),sizeof(int));
+    i+=sizeof(int);
     
     myDB->root = node_disk_read(myDB,root_offset);
     //print_Node_info((struct DB *)myDB,myDB->root);
@@ -402,14 +443,14 @@ struct DB *dbopen(const char *file){
         return NULL;
     }
     
-    if(lseek(file_id, myDB->chunk_size, SEEK_SET)<0){
+    if(lseek(id_file, myDB->chunk_size, SEEK_SET)<0){
         fprintf(stderr,"ERROR: lseek()\n");
         return NULL;
     }
     long j;
-    //next in file (max_size/8)/chunk_size pages of bitmask myDB->exist
+    //next in file (max_size/8)/chunk_size pages of bitset myDB->exist
     for(j=0;j < (myDB->max_size / 8)/ myDB->chunk_size; j++){
-        if(read(file_id, myDB->buffer,myDB->chunk_size)!=myDB->chunk_size){
+        if(read(id_file, myDB->buffer,myDB->chunk_size)!=myDB->chunk_size){
             fprintf(stderr,"ERROR: read()\n");
             return NULL;
         }
@@ -418,21 +459,6 @@ struct DB *dbopen(const char *file){
     }
     //print_DB_info((struct DB *)myDB);
     return (struct DB *)myDB;
-}
-
-int dbclose(struct DB *db){
-    int res;
-    struct MyDB *myDB = (struct MyDB *) db;
-    if(close(myDB->id_file)<0){
-        fprintf(stderr,"ERROR: CANNOT close file\n");
-        res = -1;
-    }
-    if(myDB==NULL) return -1;
-    node_free(myDB,myDB->root);
-    free(myDB->buffer);
-    free(myDB->exist);
-    free(myDB);
-    return res;  
 }
 
 
@@ -578,6 +604,7 @@ int insert(struct DB *db, struct DBT *key, struct DBT *data){
         struct BTreeNode *s = create_BTreeNode(myDB);
         s->leaf = false;
         myDB->root = s;
+        myDB->depth++;
         s->childs[0] = r->offset;
         //s->n = 0; by default in node_malloc by create_BTreeNode
         dbmetadata_disk_write(myDB,-1); // -1 is coz no need to update exist
@@ -641,6 +668,7 @@ void print_DB_info(const struct DB *db){
     printf("chunk_size -> %lu \n",myDB->chunk_size);
     printf("max_size -> %lu \n",myDB->max_size);
     printf("size -> %lu \n",myDB->size);
+    printf("depth -> %d \n",myDB->depth);
     long i;
     char j;
     printf("-------EXISTS:\n");
@@ -676,6 +704,46 @@ void print_Node_info(const struct DB *db, struct BTreeNode *node){
     else printf("|||| no children :( ||||\n");
     printf("\n-----------------ENDOFCHILDREN of %lu\n\n",node->offset);
 }
+//interface
+
+int db_close(struct DB *db) {
+	db->close(db);
+}
+
+int db_del(struct DB *db, void *key, size_t key_len) {
+	struct DBT keyt = {
+		.data = key,
+		.size = key_len
+	};
+	return db->del(db, &keyt);
+}
+
+int db_get(struct DB *db, void *key, size_t key_len,
+	   void **val, size_t *val_len) {
+	struct DBT keyt = {
+		.data = key,
+		.size = key_len
+	};
+	struct DBT valt = {0, 0};
+	int rc = db->get(db, &keyt, &valt);
+	*val = valt.data;
+	*val_len = valt.size;
+	return rc;
+}
+
+int db_put(struct DB *db, void *key, size_t key_len,
+	   void *val, size_t val_len) {
+	struct DBT keyt = {
+		.data = key,
+		.size = key_len
+	};
+	struct DBT valt = {
+		.data = val,
+		.size = val_len
+	};
+	return db->put(db, &keyt, &valt);
+}
+
 
 
 // --------------------- Main OPEN AND CREATE for debug purposes ---------------
@@ -700,7 +768,8 @@ int main1(){
     
     if(search(db,&key,&value)<0) fprintf(stderr,"(____|____) NOT FOUND!!!\n");
     else fprintf(stderr,"%s\n",(char *)value.data);
-    
+    free(key.data);
+    free(value.data);
     dbclose(db);
     return 0;
 }
@@ -714,8 +783,8 @@ int main(int argc, char *argv[]){
     struct DBC dbc;
     dbc.db_size = 512 * 1024 * 1024;
     dbc.chunk_size = 4096;
-    dbc.mem_size = 16 * 1024 * 1024;
-    struct DB *db = dbcreate("my.db",&dbc); 
+    //dbc.mem_size = 16 * 1024 * 1024;
+    struct DB *db = dbcreate("my.db",dbc); 
     
     struct DBT key,value;
     print_DB_info(db);
@@ -762,6 +831,9 @@ int main(int argc, char *argv[]){
     
     
     print_DB_info(db);
+    free(key.data);
+    free(value.data);
     dbclose(db);
     return 0;
 }
+
