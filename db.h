@@ -51,7 +51,7 @@ struct BTreeNode{
 struct MyDB{
     /* Public API */
     int (*close)(struct DB *db);
-    int (*del)(struct DB *db, const struct DBT *key);
+    int (*del)(struct DB *db, struct DBT *key);
     int (*get)(const struct DB *db, struct DBT *key, struct DBT *data);
     int (*put)(struct DB *db, struct DBT *key, struct DBT *data);
     int (*sync)(const struct DB *db);
