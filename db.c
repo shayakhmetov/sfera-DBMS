@@ -146,10 +146,11 @@ int node_disk_write(struct MyDB *myDB, struct BTreeNode *node){
     i+=sizeof(size_t);
     long j;
     
-    if(node->n == 0 ){ 
+    if(node->n == 0 && (myDB->root!=node || myDB->size > 1)){ 
             fprintf(stderr,"WRITEimpossible\n");
             //print_Node_info((struct DB *)myDB,node);
-            //print_DB_info((struct DB *)myDB); 
+            print_DB_info((struct DB *)myDB);
+            fprintf(stderr,"WRITEimpossible\n");
             //return -1;
     } 
     for(j=0; j < node->n + 1; j++){ //n+1 CHILDS
@@ -763,6 +764,17 @@ struct DBT *get_successor_key(struct MyDB *myDB, struct BTreeNode *x, struct DBT
     }
 }
 
+int remove_key(struct BTreeNode *x, long i){ //remove x->keys[i] == Lshift
+    long j;
+    for(j=i;j<x->n-1;j++){
+        memcpy(x->keys[j].data,x->keys[j+1].data, MAX_KEY_LENGTH);
+        memcpy(&(x->keys[j].size), &(x->keys[j+1].size),sizeof(size_t));
+        memcpy(x->values[j].data,x->values[j+1].data, MAX_VALUE_LENGTH);
+        memcpy(&(x->values[j].size), &(x->values[j+1].size),sizeof(size_t));
+    }
+    return 0;
+}
+
 int merge_nodes(struct MyDB *myDB, struct BTreeNode *x, struct BTreeNode *a, struct BTreeNode *b, size_t index){ //index ~ key==x->keys[index]
     
     memcpy(a->keys[a->n].data,x->keys[index].data, MAX_KEY_LENGTH);
@@ -780,16 +792,11 @@ int merge_nodes(struct MyDB *myDB, struct BTreeNode *x, struct BTreeNode *a, str
     for(j=0; j<b->n+1;j++)
         a->childs[a->n+1+j] = b->childs[j];  
 
-    for(j=index;j<x->n-1;j++){
-        memcpy(x->keys[j].data,x->keys[j+1].data, MAX_KEY_LENGTH);
-        memcpy(&(x->keys[j].size), &(x->keys[j+1].size),sizeof(size_t));
-        memcpy(x->values[j].data,x->values[j+1].data, MAX_VALUE_LENGTH);
-        memcpy(&(x->values[j].size), &(x->values[j+1].size),sizeof(size_t));
-    }
+    remove_key(x,index);
     for(j=index+1;j<x->n;j++)
         x->childs[j]=x->childs[j+1];
-    
     x->n--;
+    
     a->n += 1 + b->n;
     
     if(a->n != 2*myDB->t -1) fprintf(stderr, "impossibleMERGE\n");
@@ -798,7 +805,7 @@ int merge_nodes(struct MyDB *myDB, struct BTreeNode *x, struct BTreeNode *a, str
     return 0;//does not free memory, not disk_node_write
 }
 
-int delete_case3_helper(struct MyDB *myDB, struct BTreeNode *x,struct BTreeNode *a,struct BTreeNode *y, struct DBT *key, bool left, long i){
+int delete_case3_helper(struct MyDB *myDB, struct BTreeNode *x,struct BTreeNode *a,struct BTreeNode *y, struct DBT *key, bool i_positive, long i){
     struct BTreeNode *b = node_disk_read(myDB,x->childs[i+1]);
     long j;
     if(b->n >= myDB->t){
@@ -812,15 +819,11 @@ int delete_case3_helper(struct MyDB *myDB, struct BTreeNode *x,struct BTreeNode 
         memcpy(x->values[i].data,b->values[0].data, MAX_VALUE_LENGTH);
         memcpy(&(x->values[i].size), &(b->values[0].size),sizeof(size_t));
         
-        for(j=0;j<b->n-1;j--){
-            memcpy(b->keys[j].data,b->keys[j+1].data, MAX_KEY_LENGTH);
-            memcpy(&(b->keys[j].size), &(b->keys[j+1].size),sizeof(size_t));
-            memcpy(b->values[j].data,b->values[j+1].data, MAX_VALUE_LENGTH);
-            memcpy(&(b->values[j].size), &(b->values[j+1].size),sizeof(size_t));
-        }
+        remove_key(b,0);
         
         y->childs[y->n+1] = b->childs[0];
-        for(j=0;j<b->n;j--){
+        
+        for(j=0;j<b->n;j++){
             b->childs[j] = b->childs[j+1];
         }
         
@@ -835,32 +838,43 @@ int delete_case3_helper(struct MyDB *myDB, struct BTreeNode *x,struct BTreeNode 
         return res;
     }
     else if(b->n == myDB->t -1 && (i>0 && a->n == myDB->t -1 || i==0)){
-        if(left){
+        if(i_positive){
             merge_nodes(myDB, x, a, y, i-1);
-            node_disk_write(myDB, x);
-            node_disk_write(myDB, a);
             node_free(myDB, y); 
             node_free(myDB, b);
+            node_disk_write(myDB, a);
+            if(x==myDB->root && x->n==0){
+                myDB->depth--;
+                myDB->root = a;
+                node_disk_delete(myDB,x->offset);
+                dbmetadata_disk_write(myDB,-1);//update root offset
+                node_free(myDB,x);
+                int res = delete_from_node(myDB,a,key);
+                return res;
+            }
+            node_disk_write(myDB, x);
+        
             int res = delete_from_node(myDB,a,key);
             node_free(myDB,a);
             return res;
         }
         else {
             merge_nodes(myDB, x, y, b, i);
-            node_disk_write(myDB, x);
             node_disk_write(myDB, y);
             node_free(myDB, b);
-            if(x==myDB->root && x->n==1){
+            if(x==myDB->root && x->n==0){
                 myDB->depth--;
                 myDB->root = y;
                 node_disk_delete(myDB,x->offset);
-                dbmetadata_disk_write(myDB,-1);
-                node_disk_write(myDB, y);
-                node_free(myDB, x);
+                dbmetadata_disk_write(myDB,-1);//update root offset
+                node_free(myDB,x);
+                int res = delete_from_node(myDB,y,key);
+                return res;
             }
+            node_disk_write(myDB, x);
             int res = delete_from_node(myDB,y,key);
             
-            if(myDB->root!=y) node_free(myDB,y);
+            node_free(myDB,y);
             return res; 
         }
     }
@@ -877,12 +891,7 @@ int delete_from_node(struct MyDB *myDB, struct BTreeNode *x, struct DBT * key){
     for(i=0;i<x->n && compare(*key , x->keys[i]) > 0;i++) ;
     if(i<x->n && compare(*key , x->keys[i]) == 0){
         if(x->leaf){
-            for(j=i;j<x->n-1;j--){
-                memcpy(x->keys[j].data,x->keys[j+1].data, MAX_KEY_LENGTH);
-                memcpy(&(x->keys[j].size), &(x->keys[j+1].size),sizeof(size_t));
-                memcpy(x->values[j].data,x->values[j+1].data, MAX_VALUE_LENGTH);
-                memcpy(&(x->values[j].size), &(x->values[j+1].size),sizeof(size_t));
-            }
+            remove_key(x,i);
             x->n--;
             node_disk_write(myDB, x);
             return res;
@@ -931,26 +940,27 @@ int delete_from_node(struct MyDB *myDB, struct BTreeNode *x, struct DBT * key){
                 }
                 else if(a->n == myDB->t-1 && b->n == myDB->t-1){ // case 2,c
                     merge_nodes(myDB, x, a , b , i);
-                    res = delete_from_node(myDB,a,key);
                     node_disk_write(myDB, a);
+                    if(x==myDB->root && x->n==0){
+                        node_free(myDB,b);
+                        myDB->depth--;
+                        myDB->root = a;
+                        node_disk_delete(myDB,x->offset);
+                        dbmetadata_disk_write(myDB,-1);//update root offset
+                        node_free(myDB,x);
+                        res = delete_from_node(myDB,a,key);
+                        return res;
+                    }
+                                        
+                    res = delete_from_node(myDB,a,key);
                 }
                 else {
                     fprintf(stderr,"delete_impossible_case_2\n");
                 }
                 node_free(myDB,b);
             }
-
-            if(x==myDB->root && x->n==0){
-                myDB->depth--;
-                myDB->root = a;
-                node_disk_delete(myDB,x->offset);
-                dbmetadata_disk_write(myDB,-1);//update root offset
-                node_free(myDB,x);
-            }
-            else{
-                node_disk_write(myDB, x);
-                node_free(myDB,a);
-            }
+            node_disk_write(myDB, x);
+            node_free(myDB,a);
             return res;
         }
     }
@@ -1022,7 +1032,20 @@ int delete(struct DB *db, struct DBT * key){
 
 
 // --------------------- print for debug purposes ----------------
-
+int get_current_n_r(const struct MyDB *myDB, const struct BTreeNode * x){
+    int i,s = 0;
+    if(x->leaf) return x->n;
+    for(i=0;x->n>0 && i<x->n+1;i++){
+        struct BTreeNode *c = node_disk_read(myDB,x->childs[i]);
+        s +=  get_current_n_r(myDB, c);
+        node_free(myDB,c);
+    }
+    return x->n + s;
+}
+int get_current_n(const struct DB *db){//how many keys in db?
+    const struct MyDB *myDB = (const struct MyDB *) db;
+    return get_current_n_r(myDB,myDB->root);
+}
 void print_DB_info(const struct DB *db){
     const struct MyDB *myDB = (const struct MyDB *) db; 
     printf("\nDATABASE INFO\n");
@@ -1113,11 +1136,11 @@ int db_put(struct DB *db, void *key, size_t key_len,
 int main1(){
     struct DB *db = dbopen("my.db");
     
-    
-    /*struct DBT key,value;
+    /*
+    struct DBT key,value;
     value.data = NULL;
     key.data = (char *)malloc(MAX_KEY_LENGTH);
-    char s[MAX_KEY_LENGTH+1]="249455235442382426569";
+    char s[MAX_KEY_LENGTH+1]="456870127881611797542";
     key.size = 1+strlen(s);
     memcpy(key.data, s, key.size);
     if(search(db,&key,&value)<0) fprintf(stderr,"(____|____) NOT FOUND!!!\n");
@@ -1145,7 +1168,7 @@ int main(int argc, char *argv[]){
     dbc.chunk_size = 4096;
     //dbc.mem_size = 16 * 1024 * 1024;
     struct DB *db = dbcreate("my.db",dbc); 
-    const int n = 1000;
+    const int n = 5000;
     struct DBT key[n],value[n];
     int j=0,i=0;
     
@@ -1180,9 +1203,11 @@ int main(int argc, char *argv[]){
     }
     
     print_DB_info(db);
-    
+    int nk = get_current_n(db);
     for (j = 0; j < n; j++){
         delete(db,&key[j]);
+        nk--;
+        if(get_current_n(db)!=nk) fprintf(stderr,"SOMETHING GO WRONG IN DELETE!\n");
     }
     
     for(j=0;j<n;j++){
