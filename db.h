@@ -66,7 +66,7 @@ struct MyDB{
     byte *exist; //bitset for existing pages in file
     size_t size; //of pages in BTree
     size_t max_size; //max_size == max pages (.NOT db_size)
-    int depth;
+    int depth; //without delete!!
 };
 
 //For debug purposes and more

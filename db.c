@@ -35,13 +35,12 @@ int delete(struct DB *db, struct DBT * key);
 
 int delete_from_node(struct MyDB *myDB, struct BTreeNode *x, struct DBT * key);
 
-//int delete(struct DB *db, const struct DBT *key){return 0;}
-//int dbsync(const struct DB *db){return 0;}
 
 
 // offset(number of node) to real offset in file
 size_t convert_offset(const struct MyDB *myDB, size_t offset){
-    return (offset + 1 + (myDB->max_size/8)/myDB->chunk_size) * myDB->chunk_size; //+1 is because DB metadata in first chunk, next chunks for bitset
+    size_t temp = ((myDB->max_size/8) < myDB->chunk_size) ? 1 : (myDB->max_size/8)/myDB->chunk_size;
+    return (offset + 1 + temp) * myDB->chunk_size; //+1 is because DB metadata in first chunk, next chunks for bitset
 }
 
 void copy_key(struct BTreeNode *x, long i, struct BTreeNode *y, long j ){
@@ -155,13 +154,6 @@ int node_disk_write(struct MyDB *myDB, struct BTreeNode *node){
     i+=sizeof(size_t);
     long j;
     
-    if(node->n == 0 && (myDB->root!=node || myDB->size > 1)){ 
-            fprintf(stderr,"WRITEimpossible\n");
-            //print_Node_info((struct DB *)myDB,node);
-            print_DB_info((struct DB *)myDB);
-            fprintf(stderr,"WRITEimpossible\n");
-            //return -1;
-    } 
     for(j=0; j < node->n + 1; j++){ //n+1 CHILDS
         memcpy((myDB->buffer+i), &(node->childs[j]), sizeof(size_t));
         i+=sizeof(size_t);
@@ -221,13 +213,6 @@ struct BTreeNode *node_disk_read(const struct MyDB *myDB, size_t offset ){
     memcpy(&(node->n),(myDB->buffer+i),sizeof(size_t));
     i+=sizeof(size_t);
     long j;
-    
-    if(node->n == 0 && node!=myDB->root){ 
-            fprintf(stderr,"READimpossible\n");
-            //print_Node_info((struct DB *)myDB,node);
-            //print_DB_info((struct DB *)myDB); 
-            //return NULL;
-    } 
     
     for(j=0; j < node->n + 1; j++){ //n+1 CHILDS
         memcpy(&(node->childs[j]),(myDB->buffer+i), sizeof(size_t));
@@ -289,7 +274,7 @@ int dbmetadata_disk_write(struct MyDB *myDB, long index ){//update DB metadata
             fprintf(stderr,"ERROR: lseek()\n");
             return -1;
         }
-        if(write(myDB->id_file, myDB->buffer,myDB->chunk_size) != myDB->chunk_size ){
+        if(write(myDB->id_file, myDB->buffer, myDB->chunk_size) != myDB->chunk_size ){
             fprintf(stderr,"ERROR: write()\n");
             return -1;
         }
@@ -389,7 +374,8 @@ struct DB *dbcreate(const char *file, struct DBC conf){
         fprintf(stderr,"ERROR: CANNOT MALLOC myDB->buffer\n");
         return NULL;
     }
-    myDB->exist =(byte *) calloc(myDB->max_size/8, sizeof(byte));
+    size_t exist_size = (myDB->max_size/8 < myDB->chunk_size) ? myDB->chunk_size : myDB->max_size/8;
+    myDB->exist =(byte *) calloc( exist_size, sizeof(byte));
     if(myDB->exist == NULL){
         fprintf(stderr,"ERROR: CANNOT MALLOC myDB->exist\n");
         return NULL;
@@ -512,7 +498,6 @@ struct DB *dbopen(const char *file){
         for(i=0;i<myDB->chunk_size;i++)
             myDB->exist[i+j*myDB->chunk_size] = myDB->buffer[i];
     }
-    //print_DB_info((struct DB *)myDB);
     return (struct DB *)myDB;
 }
 
@@ -521,9 +506,9 @@ struct DB *dbopen(const char *file){
 
 
 int compare(const struct DBT k1, const struct DBT k2){
-    //return memcmp(k1.data, k2.data, (k1.size >= k2.size) ? k2.size : k1.size);
+    return memcmp(k1.data, k2.data, (k1.size >= k2.size) ? k2.size : k1.size);
     // version for key = string, representing number. example: "12", "145". P.S."00002323" == "2323", "99" < "100", "99" > "0999"
-    if(k1.size == k2.size){
+    /*if(k1.size == k2.size){
         return strncmp(k1.data, k2.data, k1.size);
     }
     else if(k2.size == 0 || k1.size==0) {
@@ -565,11 +550,11 @@ int compare(const struct DBT k1, const struct DBT k2){
         int result = strncmp(r1,k2.data, k2.size);
         free(r1);
         return result;
-    }
+    }*/
 }
 
 struct BTreeNode *split_child(struct MyDB *myDB, struct BTreeNode *x, long i, struct BTreeNode *y){//returns new created node
-    //y = node_disk_read(myDB, x->childs[i]); in insert_nonfull
+    //y ~= x->childs[i]
     struct BTreeNode *z = create_BTreeNode(myDB);
     z->leaf = y->leaf;
     z->n = myDB->t - 1;
@@ -633,7 +618,6 @@ int insert_nonfull(struct MyDB *myDB, struct BTreeNode *x, struct DBT *key, stru
     }
     else{
         long i;
-        if(x->n == 0 ) fprintf(stderr,"insertnonfullIMPOSSIBLE\n");
         for(i=0; i<x->n && compare(*key , x->keys[i])>0 ; i++) ;
         
         if(i<x->n && compare(*key , x->keys[i])==0  ){//if key already in x
@@ -648,7 +632,7 @@ int insert_nonfull(struct MyDB *myDB, struct BTreeNode *x, struct DBT *key, stru
         struct BTreeNode *z = NULL;
         if(c->n == 2*(myDB->t)-1){
             z = split_child(myDB,x,i,c);
-            if(((i<x->n && compare(*key, x->keys[i])>0)) || i==x->n) {
+            if(compare(*key, x->keys[i])>0) {
                 succ_child = true;
             }
         }
@@ -679,9 +663,6 @@ int insert(struct DB *db, struct DBT *key, struct DBT *data){
         
         myDB->root = s;
         struct BTreeNode *z = split_child(myDB,myDB->root, 0 ,r);
-        //node_disk_write(myDB,r); in split_child
-        //node_disk_write(myDB,s); in split_child
-        
         
         node_free(myDB,r);
         node_free(myDB,z);
@@ -697,10 +678,6 @@ int insert(struct DB *db, struct DBT *key, struct DBT *data){
 
 struct BTreeSearchResult *search_recursive(const struct MyDB *myDB, struct BTreeNode *x, struct DBT *key){
     long i;
-    if(x->n == 0 && x!=myDB->root){
-        fprintf(stderr, "cannot believe it, search\n");
-        return NULL;
-    }
     for(i=0; i<x->n && compare(*key, x->keys[i]) > 0; i++) ;
     if( i< x->n && compare(*key, x->keys[i]) == 0){
         struct BTreeSearchResult *res = malloc(sizeof(struct BTreeSearchResult));
@@ -723,6 +700,7 @@ struct BTreeSearchResult *search_recursive(const struct MyDB *myDB, struct BTree
 
 int search(const struct DB *db, struct DBT *key, struct DBT *value){
     const struct MyDB *myDB = (const struct MyDB *)db;
+    if(myDB->root->n==0) return -1;
     struct BTreeSearchResult *res = search_recursive(myDB, myDB->root, key);
     if(res == NULL) return -1;
     value->data = malloc(res->node->values[res->index].size);
@@ -787,7 +765,6 @@ int merge_nodes(struct MyDB *myDB, struct BTreeNode *x, struct BTreeNode *a, str
     
     a->n += 1 + b->n;
     
-    if(a->n != 2*myDB->t -1) fprintf(stderr, "impossibleMERGE\n");
     node_disk_delete(myDB,b->offset);
     
     return 0;//does not free memory, not disk_node_write
@@ -819,7 +796,7 @@ int delete_case3_helper(struct MyDB *myDB, struct BTreeNode *x,struct BTreeNode 
         node_disk_write(myDB, b);
         node_disk_write(myDB, y);
         node_free(myDB,b);
-        if(y->n!=myDB->t) fprintf(stderr,"y->n != t\n");
+
         res = delete_from_node(myDB,y,key);
         node_free(myDB,y);
         return res;
@@ -866,7 +843,6 @@ int delete_case3_helper(struct MyDB *myDB, struct BTreeNode *x,struct BTreeNode 
         }
     }
     else{
-        fprintf(stderr,"delete_impossible_helper\n");
         return -1;
     }
 }
@@ -947,7 +923,7 @@ int delete_from_node(struct MyDB *myDB, struct BTreeNode *x, struct DBT * key){
                     res = delete_from_node(myDB,a,key);
                 }
                 else {
-                    fprintf(stderr,"delete_impossible_case_2\n");
+                    return -1;
                 }
                 node_free(myDB,b);
             }
@@ -989,7 +965,7 @@ int delete_from_node(struct MyDB *myDB, struct BTreeNode *x, struct DBT * key){
                     node_disk_write(myDB, a);
                     node_disk_write(myDB, y);
                     node_free(myDB,a);
-                    if(y->n!=myDB->t) fprintf(stderr,"y->n != t //delete_from_node\n");
+                    
                     res = delete_from_node(myDB,y,key);
                     node_free(myDB,y);
                     return res;
@@ -1003,7 +979,6 @@ int delete_from_node(struct MyDB *myDB, struct BTreeNode *x, struct DBT * key){
             }
         }
         else {
-            fprintf(stderr,"y->n delete impossible\n");
             return -1;
         }
     }
