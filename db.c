@@ -506,9 +506,9 @@ struct DB *dbopen(const char *file){
 
 
 int compare(const struct DBT k1, const struct DBT k2){
-    return memcmp(k1.data, k2.data, (k1.size >= k2.size) ? k2.size : k1.size);
+    //return memcmp(k1.data, k2.data, k1.size);
     // version for key = string, representing number. example: "12", "145". P.S."00002323" == "2323", "99" < "100", "99" > "0999"
-    /*if(k1.size == k2.size){
+    if(k1.size == k2.size){
         return strncmp(k1.data, k2.data, k1.size);
     }
     else if(k2.size == 0 || k1.size==0) {
@@ -550,7 +550,7 @@ int compare(const struct DBT k1, const struct DBT k2){
         int result = strncmp(r1,k2.data, k2.size);
         free(r1);
         return result;
-    }*/
+    }
 }
 
 struct BTreeNode *split_child(struct MyDB *myDB, struct BTreeNode *x, long i, struct BTreeNode *y){//returns new created node
@@ -599,8 +599,8 @@ int insert_nonfull(struct MyDB *myDB, struct BTreeNode *x, struct DBT *key, stru
             long i;
             for(i=0; i < x->n && compare(*key , x->keys[i]) > 0; i++ ) ;
             if( i < x->n  && compare(*key , x->keys[i]) == 0){
-                memcpy(x->values[0].data, data->data, (data->size < MAX_VALUE_LENGTH) ? data->size : MAX_VALUE_LENGTH);
-                x->values[0].size = data->size;
+                memcpy(x->values[i].data, data->data, (data->size < MAX_VALUE_LENGTH) ? data->size : MAX_VALUE_LENGTH);
+                x->values[i].size = data->size;
                 node_disk_write(myDB,x);
                 return 0; 
             }
@@ -621,7 +621,7 @@ int insert_nonfull(struct MyDB *myDB, struct BTreeNode *x, struct DBT *key, stru
         for(i=0; i<x->n && compare(*key , x->keys[i])>0 ; i++) ;
         
         if(i<x->n && compare(*key , x->keys[i])==0  ){//if key already in x
-            memcpy(x->values[i].data,data->data, (data->size < MAX_VALUE_LENGTH) ? data->size : MAX_VALUE_LENGTH);
+            memcpy(x->values[i].data, data->data, (data->size < MAX_VALUE_LENGTH) ? data->size : MAX_VALUE_LENGTH);
             x->values[i].size = data->size;
             node_disk_write(myDB,x);
             return 0;
