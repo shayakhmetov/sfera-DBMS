@@ -1,4 +1,17 @@
+#define __MYDB_DEF__
+
 #include <stdlib.h>
+#include <stdio.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <string.h>
+
+
+#define MAX_KEY_LENGTH  22
+#define MAX_VALUE_LENGTH  22
+
 #define true 1
 #define false 0
 
@@ -31,8 +44,8 @@ struct DBC{
         //size_t mem_size; //ne nado 
 };
 
-struct DB *dbcreate(const char *file, struct DBC conf);
-struct DB *dbopen  (const char *file); /* Metadata in file */
+//struct DB *dbcreate(const char *file, struct DBC conf);
+//struct DB *dbopen  (const char *file); /* Metadata in file */
 
 int db_close(struct DB *db);
 int db_del(struct DB *, void *, size_t);
