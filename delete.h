@@ -1,8 +1,6 @@
-#define __MYDB__DELETE__
-#ifndef __MYDB_DEF__
-    #define __MYDB_DEF__
-    #include "db.h"
-#endif
+#ifndef __MYDB__DELETE__H__
+#define __MYDB__DELETE__H__
+#include "db.h"
 
 void get_predecessor_key(struct MyDB *myDB, struct BTreeNode *x, struct DBT * key, struct DBT *k, struct DBT *v);
 
@@ -18,3 +16,4 @@ int delete_from_node(struct MyDB *myDB, struct BTreeNode *x, struct DBT * key);
     
 int delete(struct DB *db, struct DBT * key);
 
+#endif

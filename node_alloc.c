@@ -1,9 +1,6 @@
 #include "node_alloc.h"
 
-#ifndef __MYDB__WORK_WITH_DISK__
-    #define __MYDB__WORK_WITH_DISK__
-    #include "work_with_disk.h"
-#endif
+#include "work_with_disk.h"
 
 
 

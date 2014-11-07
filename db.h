@@ -1,4 +1,5 @@
-#define __MYDB_DEF__
+#ifndef __MYDB_DEF__H__
+#define __MYDB_DEF__H__
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -87,3 +88,5 @@ struct BTreeSearchResult{
     struct BTreeNode *node;
     size_t index;
 };
+
+#endif

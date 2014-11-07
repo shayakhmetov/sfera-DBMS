@@ -1,21 +1,9 @@
 #include "work_with_disk.h"
 
-#ifndef __MYDB__DELETE__
-    #define __MYDB__DELETE__
-    #include "delete.h"
-#endif
-#ifndef __MYDB__INSERT__
-    #define __MYDB__INSERT__
-    #include "insert.h"
-#endif
-#ifndef __MYDB__SEARCH__
-    #define __MYDB__SEARCH__
-    #include "search.h"
-#endif
-#ifndef __MYDB__NODE_ALLOC__
-    #define __MYDB__NODE_ALLOC__
-    #include "node_alloc.h"
-#endif
+#include "delete.h"
+#include "insert.h"
+#include "search.h"
+#include "node_alloc.h"
 
 // ------------------ DISK OPERATIONS ----------------- 
 // offset(number of node) to real offset in file

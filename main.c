@@ -1,26 +1,12 @@
 #include "db.h"
 
-#ifndef __MYDB__DELETE__
-    #include "delete.h"
-#endif
-#ifndef __MYDB__INSERT__
-    #include "insert.h"
-#endif
-#ifndef __MYDB__SEARCH__
-    #include "search.h"
-#endif
-#ifndef __MYDB__WORK_WITH_DISK__
-    #include "work_with_disk.h"
-#endif
-#ifndef __MYDB__WORK_WITH_KEY__
-    #include "work_with_key.h"
-#endif
-#ifndef __MYDB__PRINT_FOR_DEBUG__
-    #include "print_for_debug.h"
-#endif
-#ifndef __MYDB__NODE_ALLOC__
-    #include "node_alloc.h"
-#endif
+#include "delete.h"
+#include "insert.h"
+#include "search.h"
+#include "work_with_disk.h"
+#include "work_with_key.h"
+#include "print_for_debug.h"
+#include "node_alloc.h"
 
 #include <time.h>
 

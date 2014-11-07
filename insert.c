@@ -1,17 +1,8 @@
 #include "insert.h"
 
-#ifndef __MYDB__WORK_WITH_DISK__
-    #define __MYDB__WORK_WITH_DISK__
-    #include "work_with_disk.h"
-#endif
-#ifndef __MYDB__WORK_WITH_KEY__
-    #define __MYDB__WORK_WITH_KEY__
-    #include "work_with_key.h"
-#endif
-#ifndef __MYDB__NODE_ALLOC__
-    #define __MYDB__NODE_ALLOC__
-    #include "node_alloc.h"
-#endif
+#include "work_with_disk.h"
+#include "work_with_key.h"
+#include "node_alloc.h"
 
 
 struct BTreeNode *split_child(struct MyDB *myDB, struct BTreeNode *x, long i, struct BTreeNode *y){//returns new created node

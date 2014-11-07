@@ -1,8 +1,7 @@
-#define __MYDB__INSERT__
-#ifndef __MYDB_DEF__
-    #define __MYDB_DEF__
-    #include "db.h"
-#endif
+#ifndef __MYDB_INSERT__H__
+#define __MYDB_INSERT__H__
+#include "db.h"
+
 
 
 struct BTreeNode *split_child(struct MyDB *myDB, struct BTreeNode *x, long i, struct BTreeNode *y);
@@ -10,3 +9,5 @@ struct BTreeNode *split_child(struct MyDB *myDB, struct BTreeNode *x, long i, st
 int insert_nonfull(struct MyDB *myDB, struct BTreeNode *x, struct DBT *key, struct DBT *data);
 
 int insert(struct DB *db, struct DBT *key, struct DBT *data);
+
+#endif
