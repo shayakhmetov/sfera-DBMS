@@ -60,8 +60,8 @@ struct BTreeNode{
 };
 
 struct LRU{
-    struct CacheItem *head;
-    struct CacheItem *pre_tail;
+    struct CacheItem *head; //last recently used
+    struct CacheItem *pre_tail; //pre_tail.next == candidate to delete
     size_t max_cur_offset;
     size_t min_cur_offset;
 };
