@@ -9,7 +9,6 @@
 #include <unistd.h>
 #include <string.h>
 
-
 #define MAX_KEY_LENGTH  22
 #define MAX_VALUE_LENGTH  22
 
@@ -18,7 +17,7 @@
 
 typedef char bool;
 typedef unsigned char byte;
-/* check `man dbopen` */
+
 struct DBT{
      void  *data;
      size_t size;
@@ -42,11 +41,9 @@ struct DBC{
         size_t chunk_size; //page,block 4KB
         /* Maximum memory size */
         /* 16MB by default */
-        //size_t mem_size; //ne nado 
+        size_t mem_size;
 };
 
-//struct DB *dbcreate(const char *file, struct DBC conf);
-//struct DB *dbopen  (const char *file); /* Metadata in file */
 
 int db_close(struct DB *db);
 int db_del(struct DB *, void *, size_t);
@@ -60,6 +57,19 @@ struct BTreeNode{
     size_t *childs; // offsets
     size_t n; //current number of keys
     size_t offset; // position of node in file according to root
+};
+
+struct LRU{
+    struct CacheItem *head;
+    struct CacheItem *pre_tail;
+    size_t max_cur_offset;
+    size_t min_cur_offset;
+};
+
+struct CacheItem{
+    struct BTreeNode *node;
+    bool need_sync;
+    struct CacheItem *next;
 };
 
 struct MyDB{
@@ -81,6 +91,9 @@ struct MyDB{
     size_t size; //of pages in BTree
     size_t max_size; //max_size == max pages (.NOT db_size)
     int depth; //without delete!!
+    size_t cache_size;
+    
+    struct LRU *cache;
 };
 
 //For debug purposes and more
