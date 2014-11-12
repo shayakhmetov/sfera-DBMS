@@ -48,6 +48,23 @@ struct BTreeNode *node_malloc(const struct MyDB *myDB){//Allocate without assign
     return node;
 }
 
+struct BTreeNode *node_copy(struct MyDB *myDB, struct BTreeNode *node){
+    struct BTreeNode *node2 = node_malloc(myDB);
+    size_t t = myDB->t;
+    node2->n = node->n;
+    node2->leaf = node->leaf;
+    node2->offset = node->offset;
+    long j;
+    for(j=0;j<2*t-1;j++){
+        memcpy(node2->keys[j].data, node->keys[j].data, MAX_KEY_LENGTH);
+        node2->keys[j].size = node->keys[j].size;
+        memcpy(node2->values[j].data, node->values[j].data, MAX_VALUE_LENGTH);
+        node2->values[j].size = node->values[j].size;
+    }
+    memcpy(node2->childs, node->childs, 2*t*sizeof(size_t));
+    return node2;
+}
+
 void node_free(const struct MyDB *myDB, struct BTreeNode *s){
     long i=0;
     for(i=0;i<2*myDB->t-1;i++){

@@ -4,7 +4,7 @@
 #include "node_alloc.h"
 
 // --------------------- print for debug purposes ----------------
-int get_current_n_r(const struct MyDB *myDB, const struct BTreeNode * x){
+int get_current_n_r(struct MyDB *myDB,  struct BTreeNode * x){
     int i,s = 0;
     if(x->leaf) return x->n;
     for(i=0;x->n>0 && i<x->n+1;i++){
@@ -14,12 +14,12 @@ int get_current_n_r(const struct MyDB *myDB, const struct BTreeNode * x){
     }
     return x->n + s;
 }
-int get_current_n(const struct DB *db){//how many keys in db?
-    const struct MyDB *myDB = (const struct MyDB *) db;
+int get_current_n( struct DB *db){//how many keys in db?
+    struct MyDB *myDB = ( struct MyDB *) db;
     return get_current_n_r(myDB,myDB->root);
 }
-void print_DB_info(const struct DB *db){
-    const struct MyDB *myDB = (const struct MyDB *) db; 
+void print_DB_info( struct DB *db){
+    struct MyDB *myDB = ( struct MyDB *) db; 
     printf("\nDATABASE INFO\n");
     printf("t -> %lu \n",myDB->t);
     printf("chunk_size -> %lu \n",myDB->chunk_size);
@@ -35,11 +35,11 @@ void print_DB_info(const struct DB *db){
         }
     }
     printf("\n||||||||--- ROOT NODE: ---|||||||||||\n");
-    print_Node_info((const struct DB *)myDB, myDB->root);
+    print_Node_info(( struct DB *)myDB, myDB->root);
 }
 
-void print_Node_info(const struct DB *db, struct BTreeNode *node){
-    const struct MyDB *myDB = (const struct MyDB *) db;
+void print_Node_info( struct DB *db, struct BTreeNode *node){
+    struct MyDB *myDB = ( struct MyDB *) db;
     printf("NODE INFO\n");
     printf("offset -> %lu \n",node->offset);
     printf("n -> %lu \n",node->n);
@@ -60,7 +60,7 @@ void print_Node_info(const struct DB *db, struct BTreeNode *node){
         for(i=0;i< node->n +1;i++){
             printf("\n|||||%li child is in %lu offset||||||\n",i,node->childs[i]);
             struct BTreeNode *c = node_disk_read(myDB, node->childs[i]);
-            print_Node_info((const struct DB *)myDB, c);
+            print_Node_info(( struct DB *)myDB, c);
             node_free(myDB,c);
         }
     }

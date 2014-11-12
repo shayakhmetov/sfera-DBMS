@@ -44,9 +44,9 @@ int main(int argc, char *argv[]){
     struct DBC dbc;
     dbc.db_size = 512 * 1024 * 1024;
     dbc.chunk_size = 4096;
-    //dbc.mem_size = 16 * 1024 * 1024;
+    dbc.mem_size = 16 * 1024 * 1024;
     struct DB *db = dbcreate("my.db",dbc); 
-    const int n = 10000;
+    const int n = 100000;
     struct DBT key[n],value[n];
     int j=0,i=0;
     
@@ -83,7 +83,7 @@ int main(int argc, char *argv[]){
     int nk = get_current_n(db);
     
     for (j = 0; j < n; j++){
-        if (delete(db,&key[j]) == -1) fprintf(stderr, "Delete -1\n");
+        delete(db,&key[j]);
         nk--;
         if(get_current_n(db)!=nk) {
             fprintf(stderr, "SOMETHING GO WRONG IN DELETE! %d ITERATION, %d %d . current key %s\n", j,nk,get_current_n(db),(char *)key[j].data);

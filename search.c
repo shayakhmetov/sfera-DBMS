@@ -4,7 +4,7 @@
 #include "work_with_key.h"
 #include "node_alloc.h"
 
-struct BTreeSearchResult *search_recursive(const struct MyDB *myDB, struct BTreeNode *x, struct DBT *key){
+struct BTreeSearchResult *search_recursive(struct MyDB *myDB, struct BTreeNode *x, struct DBT *key){
     long i;
     for(i=0; i<x->n && compare(*key, x->keys[i]) > 0; i++) ;
     if( i< x->n && compare(*key, x->keys[i]) == 0){
@@ -26,8 +26,8 @@ struct BTreeSearchResult *search_recursive(const struct MyDB *myDB, struct BTree
 }
 
 
-int search(const struct DB *db, struct DBT *key, struct DBT *value){
-    const struct MyDB *myDB = (const struct MyDB *)db;
+int search(struct DB *db, struct DBT *key, struct DBT *value){
+    struct MyDB *myDB = (struct MyDB *)db;
     if(myDB->root->n==0) return -1;
     struct BTreeSearchResult *res = search_recursive(myDB, myDB->root, key);
     if(res == NULL) return -1;

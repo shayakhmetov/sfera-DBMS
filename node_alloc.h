@@ -3,6 +3,8 @@
 #include "db.h"
 struct BTreeNode *node_malloc(const struct MyDB *myDB);
 
+struct BTreeNode *node_copy(struct MyDB *myDB, struct BTreeNode *node);
+
 void node_free(const struct MyDB *myDB, struct BTreeNode *s);
 
 int assign_BTreeNode(struct MyDB *myDB, struct BTreeNode *node);

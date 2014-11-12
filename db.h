@@ -9,6 +9,9 @@
 #include <unistd.h>
 #include <string.h>
 
+#include "uthash.h"
+#include <sys/queue.h>
+
 #define MAX_KEY_LENGTH  22
 #define MAX_VALUE_LENGTH  22
 
@@ -25,11 +28,11 @@ struct DBT{
 
 struct DB{
     /* Public API */
-    int (*close)(const struct DB *db);
-    int (*del)(struct DB *db, const struct DBT *key);
-    int (*get)(const struct DB *db, struct DBT *key, struct DBT *data);
+    int (*close)(struct DB *db);
+    int (*del)(struct DB *db, struct DBT *key);
+    int (*get)(struct DB *db, struct DBT *key, struct DBT *data);
     int (*put)(struct DB *db, struct DBT *key, struct DBT *data);
-    int (*sync)(const struct DB *db);
+    int (*sync)(struct DB *db);
 }; /* Need for supporting multiple backends (HASH/BTREE) */
 
 struct DBC{
@@ -59,26 +62,34 @@ struct BTreeNode{
     size_t offset; // position of node in file according to root
 };
 
-struct LRU{
-    struct CacheItem *head; //last recently used
-    struct CacheItem *pre_tail; //pre_tail.next == candidate to delete
-    size_t max_cur_offset;
-    size_t min_cur_offset;
+struct Cache {
+    size_t cache_size;
+    size_t current_size;
+    struct ListLRU *lru;
+    struct Hash *hash;
 };
 
-struct CacheItem{
+struct ListLRU_item {
+    TAILQ_ENTRY(ListLRU_item) tailq;
+    size_t offset;
+};
+
+TAILQ_HEAD(ListLRU, ListLRU_item);
+
+struct Hash {
+    int offset;
     struct BTreeNode *node;
-    bool need_sync;
-    struct CacheItem *next;
+    struct ListLRU_item *list_item;
+    UT_hash_handle hh;
 };
 
-struct MyDB{
+struct MyDB {
     /* Public API */
     int (*close)(struct DB *db);
     int (*del)(struct DB *db, struct DBT *key);
-    int (*get)(const struct DB *db, struct DBT *key, struct DBT *data);
+    int (*get)(struct DB *db, struct DBT *key, struct DBT *data);
     int (*put)(struct DB *db, struct DBT *key, struct DBT *data);
-    int (*sync)(const struct DB *db);
+    int (*sync)(struct DB *db);
     
     size_t t;//const for max, max_node_keys = 2t-1
     size_t chunk_size;
@@ -91,9 +102,9 @@ struct MyDB{
     size_t size; //of pages in BTree
     size_t max_size; //max_size == max pages (.NOT db_size)
     int depth; //without delete!!
-    size_t cache_size;
+    size_t cache_size; //in cache_elements
     
-    struct LRU *cache;
+    struct Cache *cache;
 };
 
 //For debug purposes and more

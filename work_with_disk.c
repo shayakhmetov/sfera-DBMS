@@ -5,10 +5,9 @@
 #include "search.h"
 #include "node_alloc.h"
 #include "cache.h"
-
 // ------------------ DISK OPERATIONS ----------------- 
 // offset(number of node) to real offset in file
-size_t convert_offset(const struct MyDB *myDB, size_t offset){
+size_t convert_offset(struct MyDB *myDB, size_t offset){
     size_t temp = ((myDB->max_size/8) < myDB->chunk_size) ? 1 : (myDB->max_size/8)/myDB->chunk_size;
     return (offset + 1 + temp) * myDB->chunk_size; //+1 is because DB metadata in first chunk, next chunks for bitset
 }
@@ -66,14 +65,16 @@ int node_flush(struct MyDB *myDB, struct BTreeNode *node){
 }
 
 int node_disk_write(struct MyDB *myDB, struct BTreeNode *node){
-    
-    if(node!=myDB->root && cache_write_node(myDB, node)){
-        return 0;
+    #ifndef __CACHE__
+    return node_flush(myDB, node);//without cache
+    #endif
+    if(node!=myDB->root){
+        cache_write_node(myDB, node);
     }
-    else return node_flush(myDB, node);
+    return node_flush(myDB, node);
 }
 
-struct BTreeNode *node_load(const struct MyDB *myDB, size_t offset){
+struct BTreeNode *node_load(struct MyDB *myDB, size_t offset){
     int id_file = myDB->id_file;
     if(id_file<0){
         fprintf(stderr,"NOT VALID FILE DESCRIPTOR\n");
@@ -126,13 +127,16 @@ struct BTreeNode *node_load(const struct MyDB *myDB, size_t offset){
     return node;
 }
 
-struct BTreeNode *node_disk_read(const struct MyDB *myDB, size_t offset ){
-    //if(offset == myDB->root->offset) return myDB->root;
-    struct BTreeNode *node;
-    if(node = cache_find_node(myDB, offset)){
-        return node;
+struct BTreeNode *node_disk_read(struct MyDB *myDB, size_t offset ){
+    #ifndef __CACHE__
+    return node_load(myDB, offset);//without cache
+    #endif
+    struct BTreeNode *node = cache_find_node(myDB, (int)offset);
+    if(node == NULL){
+        node = node_load(myDB, offset);
+        cache_add_node(myDB, node);
     }
-    else return node_load(myDB, offset);
+    return node;
 }
 
 int dbmetadata_disk_write(struct MyDB *myDB, long index ){//update DB metadata
@@ -178,6 +182,9 @@ int dbmetadata_disk_write(struct MyDB *myDB, long index ){//update DB metadata
 }
 
 int node_disk_delete(struct MyDB *myDB, size_t offset){
+    #ifdef __CACHE__
+    cache_delete_node(myDB, (int)offset);
+    #endif
     int id_file = myDB->id_file;
     if(id_file<0){
         fprintf(stderr,"NOT VALID FILE DESCRIPTOR\n");
@@ -228,7 +235,9 @@ int dbclose(struct DB *db){
     node_free(myDB,myDB->root);
     free(myDB->buffer);
     free(myDB->exist);
+    #ifdef __CACHE__
     cache_free(myDB);
+    #endif
     free(myDB);
     return res;  
 }
@@ -248,7 +257,7 @@ struct DB *dbcreate(const char *file, struct DBC conf){
     myDB->get = &search;
     myDB->put = &insert;
     myDB->del = &delete;
-    myDB->sync = &dbsync;
+    //myDB->sync = &dbsync;
     
     myDB->root = NULL;
     myDB->buffer = NULL;
@@ -257,7 +266,7 @@ struct DB *dbcreate(const char *file, struct DBC conf){
     myDB->id_file = id_file;
     
     myDB->chunk_size = conf.chunk_size;
-    myDB->cache_size = conf.mem_size;
+    myDB->cache_size = conf.mem_size/conf.chunk_size;
     
     int max_node_keys = (myDB->chunk_size - 3*sizeof(size_t)-sizeof(bool))/(3*sizeof(size_t) + MAX_KEY_LENGTH + MAX_VALUE_LENGTH); // max_node_keys == 2t-1
     if(max_node_keys % 2 == 0) max_node_keys -= 1;
@@ -299,7 +308,8 @@ struct DB *dbcreate(const char *file, struct DBC conf){
     i+=sizeof(size_t);
     memcpy((myDB->buffer+i),&(myDB->depth),sizeof(int));
     i+=sizeof(int);
-    
+    memcpy((myDB->buffer+i),&(myDB->cache_size),sizeof(size_t));
+    i+=sizeof(size_t);
     
     if(write(id_file, myDB->buffer , myDB->chunk_size) != myDB->chunk_size){//first main chunk with metadata in file
         fprintf(stderr,"ERROR: write\n");
@@ -314,9 +324,11 @@ struct DB *dbcreate(const char *file, struct DBC conf){
             return NULL;
         }
     }
-    node_disk_write(myDB,myDB->root);
+    node_flush(myDB,myDB->root);
     
-    cache_create(myDB);
+    #ifdef __CACHE__
+    myDB->cache = cache_create(myDB->cache_size);
+    #endif
     return (struct DB *)myDB;
 }
 
@@ -373,8 +385,10 @@ struct DB *dbopen(const char *file){
     i+=sizeof(size_t);
     memcpy(&(myDB->depth),(myDB->buffer+i),sizeof(int));
     i+=sizeof(int);
+    memcpy(&(myDB->cache_size),(myDB->buffer+i),sizeof(size_t));
+    i+=sizeof(size_t);
     
-    myDB->root = node_disk_read(myDB,root_offset);
+    myDB->root = node_load(myDB,root_offset);
     
     myDB->exist = calloc(myDB->max_size/8 , sizeof(byte));
     if(myDB->exist == NULL){
@@ -396,6 +410,8 @@ struct DB *dbopen(const char *file){
         for(i=0;i<myDB->chunk_size;i++)
             myDB->exist[i+j*myDB->chunk_size] = myDB->buffer[i];
     }
-    cache_create(myDB);
+    #ifdef __CACHE__
+    myDB->cache = cache_create(myDB->cache_size);
+    #endif
     return (struct DB *)myDB;
 }
