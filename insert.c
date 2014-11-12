@@ -84,8 +84,14 @@ int insert_nonfull(struct MyDB *myDB, struct BTreeNode *x, struct DBT *key, stru
         struct BTreeNode *z = NULL;
         if(c->n == 2*(myDB->t)-1){
             z = split_child(myDB,x,i,c);
-            if(compare(*key, x->keys[i])>0) {
+            if(compare(*key, x->keys[i])>0){
                 succ_child = true;
+            }
+            else if(compare(*key, x->keys[i]) == 0){
+                memcpy(x->values[i].data, data->data, (data->size < MAX_VALUE_LENGTH) ? data->size : MAX_VALUE_LENGTH);
+                x->values[i].size = data->size;
+                node_disk_write(myDB,x);
+                return 0;
             }
         }
         if(succ_child == true) {
